@@ -181,6 +181,7 @@ export class FileDiff<LAnnotation = undefined> {
   protected bufferAfter: HTMLElement | undefined;
   protected themeCSSStyle: HTMLStyleElement | undefined;
   protected appliedThemeCSS: AppliedThemeStyleCache | undefined;
+  protected adoptedThemeCSSFromReusableShell = false;
   protected unsafeCSSStyle: HTMLStyleElement | undefined;
   protected appliedUnsafeCSS: string | undefined;
   protected gutterUtilityContent: HTMLElement | undefined;
@@ -499,6 +500,7 @@ export class FileDiff<LAnnotation = undefined> {
     this.lastRowCount = undefined;
     this.themeCSSStyle = undefined;
     this.appliedThemeCSS = undefined;
+    this.adoptedThemeCSSFromReusableShell = false;
     this.unsafeCSSStyle = undefined;
     this.appliedUnsafeCSS = undefined;
 
@@ -997,6 +999,7 @@ export class FileDiff<LAnnotation = undefined> {
     this.spriteSVG = undefined;
     this.themeCSSStyle = undefined;
     this.appliedThemeCSS = undefined;
+    this.adoptedThemeCSSFromReusableShell = false;
     this.unsafeCSSStyle = undefined;
     this.appliedUnsafeCSS = undefined;
 
@@ -1116,29 +1119,66 @@ export class FileDiff<LAnnotation = undefined> {
       fileContainer ??
       this.fileContainer ??
       document.createElement(DIFFS_TAG_NAME);
+    const containerChanged = previousContainer !== this.fileContainer;
     // NOTE(amadeus): If the container changes, we should reset the rendered
     // HTML
-    if (previousContainer != null && previousContainer !== this.fileContainer) {
+    if (previousContainer != null && containerChanged) {
       this.lastRenderedHeaderHTML = undefined;
       this.headerElement = undefined;
     }
     if (parentNode != null && this.fileContainer.parentNode !== parentNode) {
       parentNode.appendChild(this.fileContainer);
     }
+    if (containerChanged) {
+      this.adoptReusableShellElements(this.fileContainer);
+    }
+    this.ensureSpriteSVG(this.fileContainer);
+    return this.fileContainer;
+  }
+
+  protected getFileContainer(): HTMLElement | undefined {
+    return this.fileContainer;
+  }
+
+  private adoptReusableShellElements(fileContainer: HTMLElement): void {
+    const { shadowRoot } = fileContainer;
+    if (shadowRoot == null) {
+      return;
+    }
+
+    for (const element of shadowRoot.children) {
+      if (element instanceof SVGElement) {
+        this.spriteSVG ??= element;
+      } else if (
+        isStyleNode(element) &&
+        element.hasAttribute(THEME_CSS_ATTRIBUTE)
+      ) {
+        this.themeCSSStyle ??= element;
+        this.adoptedThemeCSSFromReusableShell = true;
+      } else if (
+        isStyleNode(element) &&
+        element.hasAttribute(UNSAFE_CSS_ATTRIBUTE)
+      ) {
+        this.unsafeCSSStyle ??= element;
+        this.appliedUnsafeCSS ??= this.options.unsafeCSS ?? undefined;
+      }
+    }
+  }
+
+  private ensureSpriteSVG(fileContainer: HTMLElement): void {
+    const shadowRoot =
+      fileContainer.shadowRoot ?? fileContainer.attachShadow({ mode: 'open' });
     if (this.spriteSVG == null) {
       const fragment = document.createElement('div');
       fragment.innerHTML = SVGSpriteSheet;
       const firstChild = fragment.firstChild;
       if (firstChild instanceof SVGElement) {
         this.spriteSVG = firstChild;
-        this.fileContainer.shadowRoot?.appendChild(this.spriteSVG);
       }
     }
-    return this.fileContainer;
-  }
-
-  protected getFileContainer(): HTMLElement | undefined {
-    return this.fileContainer;
+    if (this.spriteSVG != null && this.spriteSVG.parentNode !== shadowRoot) {
+      shadowRoot.appendChild(this.spriteSVG);
+    }
   }
 
   private getOrCreatePreNode(container: HTMLElement): HTMLPreElement {
@@ -1324,6 +1364,7 @@ export class FileDiff<LAnnotation = undefined> {
       shadowRoot.appendChild(this.unsafeCSSStyle);
     }
     // Wrap in @layer unsafe to match SSR behavior
+    incrementCSSWriteStat('unsafeStyleWrites', unsafeCSS.length);
     this.unsafeCSSStyle.textContent = wrapUnsafeCSS(unsafeCSS);
     this.appliedUnsafeCSS = unsafeCSS;
   }
@@ -1350,6 +1391,21 @@ export class FileDiff<LAnnotation = undefined> {
       this.appliedThemeCSS.theme = theme;
       return;
     }
+    if (
+      this.adoptedThemeCSSFromReusableShell &&
+      this.themeCSSStyle?.parentNode === shadowRoot
+    ) {
+      this.adoptedThemeCSSFromReusableShell = false;
+      this.appliedThemeCSS = {
+        theme,
+        themeStyles,
+        themeType: effectiveThemeType,
+        baseThemeType,
+        scrollbarGutter,
+      };
+      return;
+    }
+    incrementCSSWriteStat('themeStyleWrites', themeStyles.length);
     this.themeCSSStyle = upsertHostThemeStyle({
       shadowRoot,
       currentNode: this.themeCSSStyle,
@@ -2193,6 +2249,30 @@ function shouldRenderHeader(
   disableFileHeader = false
 ): boolean {
   return headerElement == null && hasContent && !disableFileHeader;
+}
+
+function isStyleNode(element: Element): element is HTMLStyleElement {
+  if (
+    typeof HTMLStyleElement !== 'undefined' &&
+    element instanceof HTMLStyleElement
+  ) {
+    return true;
+  }
+  const tagName = element.tagName ?? element.nodeName;
+  return typeof tagName === 'string' && tagName.toLowerCase() === 'style';
+}
+
+function incrementCSSWriteStat(
+  key: 'themeStyleWrites' | 'unsafeStyleWrites',
+  bytes: number
+): void {
+  const global = globalThis as typeof globalThis & {
+    __DIFFS_ELEMENT_POOL_STATS?: Record<string, number | undefined>;
+  };
+  const stats = (global.__DIFFS_ELEMENT_POOL_STATS ??= {});
+  const bytesKey = `${key}Bytes`;
+  stats[key] = (stats[key] ?? 0) + 1;
+  stats[bytesKey] = (stats[bytesKey] ?? 0) + bytes;
 }
 
 function getElementChildren(
