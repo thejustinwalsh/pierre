@@ -318,6 +318,26 @@ export interface FileDiffMetadata {
    * the `cacheKey`.
    */
   cacheKey?: string;
+
+  /**
+   * Pre-computed intra-line ranges from a syntax-aware diff source
+   * (e.g. difftastic, tree-sitter). When set, the renderer emits these
+   * as `data-diff-span` decorations for this file and ignores the
+   * options-level `lineDiffType` for this file only.
+   */
+  intraLineRanges?: FileIntraLineRanges;
+}
+
+export interface IntraLineRange {
+  /** Inclusive start (UTF-16 code units). */
+  start: number;
+  /** Exclusive end. */
+  end: number;
+}
+
+export interface FileIntraLineRanges {
+  deletions?: Readonly<Record<number, ReadonlyArray<IntraLineRange>>>;
+  additions?: Readonly<Record<number, ReadonlyArray<IntraLineRange>>>;
 }
 
 export type MergeConflictMarkerRowType =

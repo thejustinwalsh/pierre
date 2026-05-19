@@ -12,6 +12,7 @@ import type {
   FileContents,
   FileDiffMetadata,
   ForceDiffPlainTextOptions,
+  IntraLineRange,
   LineDiffTypes,
   LineInfo,
   RenderDiffFilesResult,
@@ -87,6 +88,7 @@ export function renderDiffWithHighlighter(
   const { maxLineDiffLength } = options;
   const shouldGroupAll = !forcePlainText && !diff.isPartial;
   const expandedHunksForIteration = forcePlainText ? expandedHunks : undefined;
+  const intraLineRanges = diff.intraLineRanges ?? null;
   const buckets = new Map<number, RenderBucket>();
   function getBucketForHunk(hunkIndex: number) {
     const index = shouldGroupAll ? 0 : hunkIndex;
@@ -133,7 +135,26 @@ export function renderDiffWithHighlighter(
           ? additionLine.splitLineIndex
           : deletionLine.splitLineIndex;
 
-      if (type === 'change' && additionLine != null && deletionLine != null) {
+      if (intraLineRanges != null) {
+        if (deletionLine != null) {
+          pushIntraLineRanges(
+            intraLineRanges.deletions?.[deletionLine.lineIndex],
+            bucket.deletionContent.length,
+            bucket.deletionDecorations
+          );
+        }
+        if (additionLine != null) {
+          pushIntraLineRanges(
+            intraLineRanges.additions?.[additionLine.lineIndex],
+            bucket.additionContent.length,
+            bucket.additionDecorations
+          );
+        }
+      } else if (
+        type === 'change' &&
+        additionLine != null &&
+        deletionLine != null
+      ) {
         computeLineDiffDecorations({
           additionLine: diff.additionLines[additionLine.lineIndex],
           deletionLine: diff.deletionLines[deletionLine.lineIndex],
@@ -337,6 +358,29 @@ function computeLineDiffDecorations({
       );
     }
     spanIndex += span[1].length;
+  }
+}
+
+// Pushes pre-computed intra-line ranges for one line into a bucket's
+// decoration array, translating file-level positions to bucket-relative.
+function pushIntraLineRanges(
+  ranges: ReadonlyArray<IntraLineRange> | undefined,
+  bucketLineIndex: number,
+  bucketDecorations: DecorationItem[]
+) {
+  if (ranges == null) {
+    return;
+  }
+  for (const range of ranges) {
+    if (range.end <= range.start) {
+      continue;
+    }
+    bucketDecorations.push({
+      start: { line: bucketLineIndex, character: range.start },
+      end: { line: bucketLineIndex, character: range.end },
+      properties: { 'data-diff-span': '' },
+      alwaysWrap: true,
+    });
   }
 }
 
