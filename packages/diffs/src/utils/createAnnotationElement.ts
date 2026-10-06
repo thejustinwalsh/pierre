@@ -17,6 +17,14 @@ export function createAnnotationElement(span: AnnotationSpan): HASTElement {
     ],
     properties: {
       'data-line-annotation': `${span.hunkIndex},${span.lineIndex}`,
+      // A host estimate reserves the row before its content is in the DOM;
+      // ResizeManager keeps it as the least height of the pair.
+      ...(span.estimatedHeight != null && span.estimatedHeight > 0
+        ? {
+            'data-annotation-estimate': `${span.estimatedHeight}`,
+            style: `--diffs-annotation-min-height:${span.estimatedHeight}px`,
+          }
+        : {}),
     },
   });
 }

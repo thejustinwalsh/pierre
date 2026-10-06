@@ -91,6 +91,10 @@ interface DiffLayoutCache {
   // same data keyed by this view's row index, which the deltas use.
   ghostTextRows: ReadonlyMap<number, number>;
   ghostTextRowsByIndex: Map<number, number>;
+  // Host estimates for annotation rows (`DiffLineAnnotation.estimatedHeight`),
+  // by view-specific line index: the entries of `heightDeltas` that are an
+  // estimate and not yet a measurement.
+  annotationEstimates: Map<number, number>;
 }
 
 interface ResetLayoutCacheOptions {
@@ -141,7 +145,9 @@ export class VirtualizedFileDiff<
     fileAnnotationHeight: 0,
     ghostTextRows: NO_GHOST_TEXT_ROWS,
     ghostTextRowsByIndex: new Map(),
+    annotationEstimates: new Map(),
   };
+  private annotationEstimatesDirty = false;
   private isVisible: boolean = false;
   private isSetup: boolean = false;
   private virtualizer: Virtualizer | CodeView<LAnnotation, Caret>;
@@ -202,7 +208,96 @@ export class VirtualizedFileDiff<
       return false;
     }
     super.setLineAnnotations(lineAnnotations);
+    if (
+      this.cache.annotationEstimates.size > 0 ||
+      lineAnnotations.some((annotation) => annotation.estimatedHeight != null)
+    ) {
+      // The estimates are part of the layout: compute it again with them.
+      this.annotationEstimatesDirty = true;
+      this.layoutDirty = true;
+    }
     return true;
+  }
+
+  // Writes the host's annotation height estimates into `heightDeltas`, for the
+  // rows that have no measurement yet, so every layout calculation counts an
+  // annotation row before it is rendered. A row that is measured later
+  // replaces its estimate through the normal reconcile path; when the estimate
+  // was right, that is no change and no second layout.
+  private applyAnnotationEstimates(fileDiff: FileDiffMetadata): void {
+    if (!this.annotationEstimatesDirty) {
+      return;
+    }
+    this.annotationEstimatesDirty = false;
+    const { heightDeltas, annotationEstimates } = this.cache;
+    // Drop the estimates of the annotations before, where no measurement took
+    // their place.
+    for (const [lineIndex, estimate] of annotationEstimates) {
+      if (heightDeltas.get(lineIndex) === estimate) {
+        heightDeltas.delete(lineIndex);
+        this.cache.measuredHeightDeltaTotal -= estimate;
+      }
+    }
+    annotationEstimates.clear();
+
+    const additions = new Map<number, number>();
+    const deletions = new Map<number, number>();
+    for (const annotation of this.getLatestAnnotations()) {
+      const { estimatedHeight, lineNumber, side } = annotation;
+      if (estimatedHeight == null || estimatedHeight <= 0 || lineNumber < 1) {
+        continue;
+      }
+      const bySide = side === 'additions' ? additions : deletions;
+      bySide.set(lineNumber, (bySide.get(lineNumber) ?? 0) + estimatedHeight);
+    }
+    if (additions.size === 0 && deletions.size === 0) {
+      return;
+    }
+
+    const {
+      expandUnchanged = false,
+      collapsedContextThreshold = DEFAULT_COLLAPSED_CONTEXT_THRESHOLD,
+    } = this.options;
+    const diffStyle = this.getDiffStyle();
+    // Only rows that render have a height: a line inside a collapsed region
+    // has no row, and no estimate.
+    iterateOverDiff({
+      diff: fileDiff,
+      diffStyle,
+      expandedHunks: expandUnchanged
+        ? true
+        : this.hunksRenderer.getExpandedHunksMap(),
+      collapsedContextThreshold,
+      callback: ({ additionLine, deletionLine }) => {
+        const addition =
+          additionLine != null
+            ? additions.get(additionLine.lineNumber)
+            : undefined;
+        const deletion =
+          deletionLine != null
+            ? deletions.get(deletionLine.lineNumber)
+            : undefined;
+        if (addition == null && deletion == null) {
+          return false;
+        }
+        const lineIndex =
+          diffStyle === 'split'
+            ? (additionLine?.splitLineIndex ?? deletionLine?.splitLineIndex)
+            : (additionLine?.unifiedLineIndex ??
+              deletionLine?.unifiedLineIndex);
+        const estimate =
+          diffStyle === 'split'
+            ? Math.max(addition ?? 0, deletion ?? 0)
+            : (addition ?? 0) + (deletion ?? 0);
+        if (lineIndex == null || heightDeltas.has(lineIndex)) {
+          return false;
+        }
+        heightDeltas.set(lineIndex, estimate);
+        annotationEstimates.set(lineIndex, estimate);
+        this.cache.measuredHeightDeltaTotal += estimate;
+        return false;
+      },
+    });
   }
 
   protected override syncEditSessionAnnotationsFromEditor(
@@ -315,6 +410,11 @@ export class VirtualizedFileDiff<
     this.cache.fileAnnotationHeight = 0;
     this.cache.heightDeltas.clear();
     this.cache.measuredHeightDeltaTotal = 0;
+    // The estimates went with the deltas: the next layout writes them again.
+    if (this.cache.annotationEstimates.size > 0) {
+      this.cache.annotationEstimates.clear();
+    }
+    this.annotationEstimatesDirty = true;
     this.cache.ghostTextRows = NO_GHOST_TEXT_ROWS;
     if (this.cache.ghostTextRowsByIndex.size > 0) {
       this.cache.ghostTextRowsByIndex.clear();
@@ -1272,6 +1372,7 @@ export class VirtualizedFileDiff<
       return;
     }
 
+    this.applyAnnotationEstimates(fileDiff);
     this.height =
       this.getActiveEstimatedHeight(fileDiff) +
       this.cache.measuredHeightDeltaTotal;

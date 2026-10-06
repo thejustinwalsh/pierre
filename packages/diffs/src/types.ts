@@ -578,6 +578,19 @@ export type LineAnnotation<LAnnotation = undefined> = {
 export type DiffLineAnnotation<LAnnotation = undefined> = {
   side: AnnotationSide;
   lineNumber: number;
+  /**
+   * Height in pixels of what this annotation renders, when the host knows it
+   * before the content is in the DOM. Optional; without it nothing changes.
+   *
+   * With it, the annotation row is that tall from its first render, and the
+   * virtualized layout counts the height before it measures the row: for a
+   * file that is mounted (one layout pass, not two) and for a file that is
+   * not (its estimated height includes its annotation rows). The estimates of
+   * the annotations on one line and side add up; a split row takes the taller
+   * side. A measured row replaces the estimate. The row is never shorter than
+   * the estimate. Ignored for a file-level annotation (`lineNumber: 0`).
+   */
+  estimatedHeight?: number;
 } & OptionalMetadata<LAnnotation>;
 
 export type CodeViewFileItem<LAnnotation = undefined> = {
@@ -710,6 +723,8 @@ export interface AnnotationSpan {
   hunkIndex: number;
   lineIndex: number;
   annotations: string[];
+  /** Sum of the `estimatedHeight` of the annotations of the row, when any has one. */
+  estimatedHeight?: number;
 }
 
 export interface LineEventBaseProps {
@@ -755,6 +770,8 @@ export interface ObservedAnnotationNodes {
     childHeight: number;
   };
   currentHeight: number | 'auto';
+  /** The host's estimate for the row (`data-annotation-estimate`): its least height. */
+  estimatedHeight?: number;
 }
 
 export interface ObservedGridNodes {

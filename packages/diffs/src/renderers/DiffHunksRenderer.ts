@@ -2288,9 +2288,12 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
       lineIndex,
       annotations: [],
     };
+    let deletionEstimate = 0;
+    let additionEstimate = 0;
     if (deletionLineNumber != null) {
       for (const anno of this.deletionAnnotations[deletionLineNumber] ?? []) {
         deletionSpan.annotations.push(this.annotationSlotName(anno));
+        deletionEstimate += anno.estimatedHeight ?? 0;
       }
     }
     const additionSpan: AnnotationSpan = {
@@ -2304,7 +2307,17 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
         (type === 'unified' ? deletionSpan : additionSpan).annotations.push(
           this.annotationSlotName(anno)
         );
+        additionEstimate += anno.estimatedHeight ?? 0;
       }
+    }
+    // Both rows of a split pair take the taller side; a unified row holds both.
+    const estimate =
+      type === 'unified'
+        ? deletionEstimate + additionEstimate
+        : Math.max(deletionEstimate, additionEstimate);
+    if (estimate > 0) {
+      deletionSpan.estimatedHeight = estimate;
+      additionSpan.estimatedHeight = estimate;
     }
     if (type === 'unified') {
       if (deletionSpan.annotations.length > 0) {

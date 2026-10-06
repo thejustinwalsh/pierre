@@ -219,6 +219,7 @@ export class ResizeManager {
             childHeight: child2Height,
           },
           currentHeight: 'auto',
+          ...readAnnotationEstimate(container1),
         };
         annotationUpdates.add({
           child1,
@@ -395,7 +396,10 @@ export class ResizeManager {
     }
   };
 
-  private applyNewHeight(item: ObservedAnnotationNodes, newHeight: number) {
+  private applyNewHeight(item: ObservedAnnotationNodes, measured: number) {
+    // The host's estimate is the least height: the row has it before its
+    // content is slotted in, so the content arriving does not resize the row.
+    const newHeight = Math.max(measured, item.estimatedHeight ?? 0);
     if (newHeight !== item.currentHeight) {
       item.currentHeight = Math.max(newHeight, 0);
       item.column1.container.style.setProperty(
@@ -408,6 +412,15 @@ export class ResizeManager {
       );
     }
   }
+}
+
+function readAnnotationEstimate(container: HTMLElement): {
+  estimatedHeight?: number;
+} {
+  const estimate = Number(container.dataset.annotationEstimate);
+  return Number.isFinite(estimate) && estimate > 0
+    ? { estimatedHeight: estimate }
+    : {};
 }
 
 function resolveCodeWidth(inlineSize: number): number | 'auto' {
