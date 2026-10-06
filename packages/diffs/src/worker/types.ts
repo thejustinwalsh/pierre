@@ -68,6 +68,7 @@ export interface InitializeWorkerRequest {
   id: WorkerRequestId;
   renderOptions: WorkerRenderingOptions;
   preferredHighlighter: HighlighterTypes;
+  highlightsLanguages?: string[];
   resolvedThemes: ThemeRegistrationResolved[];
   resolvedLanguages?: ResolvedLanguage[];
   customExtensionsVersion?: number;
@@ -118,6 +119,12 @@ export interface InitializeSuccessResponse {
   type: 'success';
   requestType: 'initialize';
   id: WorkerRequestId;
+  /**
+   * With the 'highlights' highlighter: the languages that the worker lexes
+   * with @pierre/highlights. It needs no Shiki grammar for them. Absent when
+   * the worker highlights with Shiki.
+   */
+  highlightsLanguages?: string[];
   sentAt: number;
 }
 
@@ -184,6 +191,12 @@ export interface WorkerPoolOptions {
 export interface WorkerInitializationRenderOptions extends Partial<WorkerRenderingOptions> {
   langs?: SupportedLanguages[];
   preferredHighlighter?: HighlighterTypes;
+  /**
+   * With `preferredHighlighter: 'highlights'`: the only languages that the
+   * workers lex with @pierre/highlights. Every other language goes to Shiki.
+   * Without it, every language that has a lexer.
+   */
+  highlightsLanguages?: SupportedLanguages[];
 }
 
 export interface InitializeWorkerTask {

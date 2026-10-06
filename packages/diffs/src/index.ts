@@ -12,6 +12,7 @@ export * from './components/VirtualizedFile';
 export * from './components/VirtualizedFileDiff';
 export * from './components/Virtualizer';
 export * from './constants';
+export * from './highlighter/highlights/types';
 export * from './highlighter/languages/areLanguagesAttached';
 export * from './highlighter/languages/attachResolvedLanguages';
 export * from './highlighter/languages/cleanUpResolvedLanguages';

@@ -97,6 +97,7 @@ type RenderTaskInstance = FileRendererInstance | DiffRendererInstance;
 export class WorkerPoolManager {
   private highlighter: DiffsHighlighter | undefined;
   private readonly preferredHighlighter: HighlighterTypes;
+  private readonly onlyHighlightsLanguages: SupportedLanguages[] | undefined;
   private renderOptions: WorkerRenderingOptions;
   private renderOptionsRequestVersion = 0;
   private renderOptionsVersion = 0;
@@ -120,6 +121,8 @@ export class WorkerPoolManager {
   private nextRequestId = 0;
   private themeSubscribers = new Set<ThemeSubscriber>();
   private workersFailed = false;
+  // Languages that the workers lex with @pierre/highlights.
+  private highlightsLanguages = new Set<SupportedLanguages>();
   private statSubscribers = new Set<(stats: WorkerStats) => unknown>();
   private fileCache: LRUMap<string, RenderFileResult>;
   private diffCache: LRUMap<string, RenderDiffResult>;
@@ -137,9 +140,11 @@ export class WorkerPoolManager {
       maxLineDiffLength = 1000,
       tokenizeMaxLineLength = 1000,
       preferredHighlighter = 'shiki-js',
+      highlightsLanguages,
     }: WorkerInitializationRenderOptions
   ) {
     this.preferredHighlighter = preferredHighlighter;
+    this.onlyHighlightsLanguages = highlightsLanguages;
     this.renderOptions = {
       theme,
       useTokenTransformer,
@@ -484,6 +489,7 @@ export class WorkerPoolManager {
     resolvedLanguages: ResolvedLanguage[]
   ): Promise<void> {
     this.workersFailed = false;
+    this.highlightsLanguages.clear();
     const initPromises: Promise<unknown>[] = [];
     const customExtensionVersion = getCustomExtensionsVersion();
     const customExtensionMap =
@@ -522,6 +528,7 @@ export class WorkerPoolManager {
               id,
               renderOptions: this.renderOptions,
               preferredHighlighter: this.preferredHighlighter,
+              highlightsLanguages: this.onlyHighlightsLanguages,
               resolvedThemes,
               resolvedLanguages,
               customExtensionsVersion:
@@ -1010,8 +1017,11 @@ export class WorkerPoolManager {
     try {
       // Lets keep the main thread highlighter in sync with loaded themes so
       // edits can be more seamless
+      // A language that the workers lex with @pierre/highlights has no
+      // grammar to load.
       const mainThreadLangs = langs.filter(
-        (lang) => !areLanguagesAttached(lang)
+        (lang) =>
+          !this.highlightsLanguages.has(lang) && !areLanguagesAttached(lang)
       );
       if (mainThreadLangs.length > 0) {
         void getSharedHighlighter({
@@ -1095,6 +1105,11 @@ export class WorkerPoolManager {
           case 'initialize':
             if (task.type !== 'initialize') {
               throw new Error('handleWorkerMessage: task/response dont match');
+            }
+            // The worker lexes these itself: it needs no grammar for them.
+            for (const language of response.highlightsLanguages ?? []) {
+              managedWorker.langs.add(language);
+              this.highlightsLanguages.add(language);
             }
             this.syncCustomExtensionVersion(managedWorker, task.request);
             task.resolve();

@@ -63,7 +63,15 @@ export type FileDiffContentsLoader = (
   fileDiff: FileDiffMetadata
 ) => Promise<FileDiffLoadedFiles>;
 
-export type HighlighterTypes = 'shiki-js' | 'shiki-wasm';
+/**
+ * - `shiki-js`, `shiki-wasm`: Shiki with its JavaScript or Oniguruma engine.
+ * - `highlights`: in a worker pool whose worker script provides the module of
+ *   @pierre/highlights (`provideHighlights`), its WebAssembly lexers for the
+ *   languages they cover and themes that carry `highlights` themes; Shiki's
+ *   JavaScript engine for every other file. On the main thread, and in a
+ *   worker with no module, the same as `shiki-js`.
+ */
+export type HighlighterTypes = 'shiki-js' | 'shiki-wasm' | 'highlights';
 
 export type HighlightedToken = [char: number, fg: string, text: string];
 

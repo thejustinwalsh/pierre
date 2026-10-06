@@ -3,6 +3,11 @@ import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 
 import { DEFAULT_THEMES } from '../constants';
+import {
+  createHighlightsHighlighter,
+  type HighlightsHighlighter,
+} from '../highlighter/highlights/createHighlightsHighlighter';
+import type { HighlightsModule } from '../highlighter/highlights/types';
 import { attachResolvedLanguages } from '../highlighter/languages/attachResolvedLanguages';
 import { attachResolvedThemes } from '../highlighter/themes/attachResolvedThemes';
 import type {
@@ -13,7 +18,10 @@ import type {
   ThemedDiffResult,
   ThemedFileResult,
 } from '../types';
-import { replaceCustomExtensions } from '../utils/getFiletypeFromFileName';
+import {
+  EXTENSION_TO_FILE_FORMAT,
+  replaceCustomExtensions,
+} from '../utils/getFiletypeFromFileName';
 import { renderDiffWithHighlighter } from '../utils/renderDiffWithHighlighter';
 import { renderFileWithHighlighter } from '../utils/renderFileWithHighlighter';
 import type {
@@ -38,6 +46,26 @@ let renderOptions: WorkerRenderingOptions = {
   lineDiffType: 'word-alt',
   maxLineDiffLength: 1000,
 };
+
+// The module of @pierre/highlights, when the script that hosts this worker
+// provides it, and the highlighter that lexes with it.
+let highlightsModule: HighlightsModule | undefined;
+let highlights: HighlightsHighlighter | undefined;
+
+/**
+ * Gives the worker the module of @pierre/highlights. A pool with
+ * `preferredHighlighter: 'highlights'` then lexes with it. Call it when the
+ * worker script starts, before the pool sends its first message:
+ *
+ *     import * as highlights from '@pierre/highlights';
+ *     import { provideHighlights } from '@pierre/diffs/worker/worker-portable.js';
+ *     provideHighlights(highlights);
+ *
+ * Without it, 'highlights' is 'shiki-js'.
+ */
+export function provideHighlights(module: HighlightsModule): void {
+  highlightsModule = module;
+}
 
 const EMPTY_REGEXP = /(?:)/;
 
@@ -84,12 +112,13 @@ async function handleInitialize({
   id,
   renderOptions: options,
   preferredHighlighter,
+  highlightsLanguages,
   resolvedThemes,
   resolvedLanguages,
   customExtensionsVersion,
   customExtensionMap,
 }: InitializeWorkerRequest): Promise<void> {
-  let highlighter = getHighlighter(preferredHighlighter);
+  let highlighter = getHighlighter(preferredHighlighter, highlightsLanguages);
   if ('then' in highlighter) {
     highlighter = await highlighter;
   }
@@ -98,6 +127,7 @@ async function handleInitialize({
     customExtensionMap,
   });
   attachResolvedThemes(resolvedThemes, highlighter);
+  highlights?.attachThemes(resolvedThemes);
   if (resolvedLanguages != null) {
     attachResolvedLanguages(resolvedLanguages, highlighter);
   }
@@ -106,6 +136,7 @@ async function handleInitialize({
     type: 'success',
     id,
     requestType: 'initialize',
+    highlightsLanguages: getHighlightsLanguages(customExtensionMap),
     sentAt: Date.now(),
   } satisfies InitializeSuccessResponse);
 }
@@ -120,6 +151,7 @@ async function handleSetRenderOptions({
     highlighter = await highlighter;
   }
   attachResolvedThemes(resolvedThemes, highlighter);
+  highlights?.attachThemes(resolvedThemes);
   renderOptions = options;
   postMessage({
     type: 'success',
@@ -184,17 +216,49 @@ async function handleRenderDiff({
 }
 
 function getHighlighter(
-  preferredHighlighter: HighlighterTypes = 'shiki-js'
+  preferredHighlighter: HighlighterTypes = 'shiki-js',
+  highlightsLanguages?: string[]
 ): Promise<DiffsHighlighter> | DiffsHighlighter {
-  highlighter ??= createHighlighterCore({
-    themes: [],
-    langs: [],
-    engine:
-      preferredHighlighter === 'shiki-wasm'
-        ? createOnigurumaEngine(import('shiki/wasm'))
-        : createJavaScriptRegexEngine(),
-  }) as Promise<DiffsHighlighter>;
+  highlighter ??= (
+    createHighlighterCore({
+      themes: [],
+      langs: [],
+      engine:
+        preferredHighlighter === 'shiki-wasm'
+          ? createOnigurumaEngine(import('shiki/wasm'))
+          : createJavaScriptRegexEngine(),
+    }) as Promise<DiffsHighlighter>
+  ).then((base) => {
+    // 'highlights' lexes with the provided module and keeps the Shiki
+    // highlighter (JavaScript engine) for every language with no lexer.
+    if (preferredHighlighter !== 'highlights' || highlightsModule == null) {
+      return base;
+    }
+    highlights = createHighlightsHighlighter(
+      base,
+      highlightsModule,
+      highlightsLanguages
+    );
+    return highlights.highlighter;
+  });
   return highlighter;
+}
+
+// The languages of the extension maps that the lexers cover: the pool sends
+// no Shiki grammar for these.
+function getHighlightsLanguages(
+  customExtensionMap: InitializeWorkerRequest['customExtensionMap']
+): string[] | undefined {
+  if (highlights == null) return undefined;
+  const languages = new Set<string>();
+  for (const map of [EXTENSION_TO_FILE_FORMAT, customExtensionMap ?? {}]) {
+    for (const language of Object.values(map)) {
+      if (language != null && highlights.supports(language)) {
+        languages.add(language);
+      }
+    }
+  }
+  return Array.from(languages);
 }
 
 function syncCustomExtensionsFromRequest({
