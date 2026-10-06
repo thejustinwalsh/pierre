@@ -3673,6 +3673,10 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
     let rowIndex = 0;
     let pendingMetadataTrim = false;
     const hasPostTrim = postTrimStart >= 0;
+    // True from the first line that the post trim removes. The annotation or
+    // no-newline row of the last line that stays comes before it: that row
+    // belongs to its line and stays, as a full render of the range has it.
+    let postTrimming = false;
 
     if (columns == null) {
       return 0;
@@ -3730,6 +3734,8 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
             if (preTrimCount === 0) {
               pendingMetadataTrim = true;
             }
+          } else {
+            postTrimming = true;
           }
           rowCount++;
         }
@@ -3758,10 +3764,7 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
         gutterElement.dataset.gutterBuffer === 'annotation' &&
         'lineAnnotation' in contentElement.dataset
       ) {
-        if (
-          preTrimCount > 0 ||
-          (hasPostTrim && visibleLineIndex >= postTrimStart)
-        ) {
+        if (preTrimCount > 0 || postTrimming) {
           gutterElement.remove();
           contentElement.remove();
           rowCount++;
@@ -3773,10 +3776,7 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
         gutterElement.dataset.gutterBuffer === 'metadata' &&
         'noNewline' in contentElement.dataset
       ) {
-        if (
-          preTrimCount > 0 ||
-          (hasPostTrim && visibleLineIndex >= postTrimStart)
-        ) {
+        if (preTrimCount > 0 || postTrimming) {
           gutterElement.remove();
           contentElement.remove();
           rowCount++;
@@ -3817,7 +3817,9 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
             gutterElement.remove();
             contentElement.remove();
             rowCount += totalRows;
+            postTrimming = true;
           } else if (postTrimStart <= bufferEnd) {
+            postTrimming = true;
             const rowsToRemove = bufferEnd - postTrimStart + 1;
             const newSize = totalRows - rowsToRemove;
             this.updateBufferSize(gutterElement, newSize);
