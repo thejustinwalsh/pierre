@@ -568,6 +568,12 @@ export interface CodeViewOptions<LAnnotation, Caret>
   pointerEventsOnScroll?: boolean;
   smoothScrollSettings?: SmoothScrollSettings;
   stickyHeaders?: boolean;
+  /**
+   * Extra pixels rendered above and below the viewport. Rows inside it mount
+   * before the reader scrolls to them, so their highlighting can be in when
+   * they show. Defaults to 200.
+   */
+  overscrollSize?: number;
   controlledSelection?: boolean;
   onSelectedLinesChange?(selection: CodeViewLineSelection | null): void;
   layout?: CodeViewLayout;
@@ -754,13 +760,24 @@ type CodeViewItemMap<LAnnotation, Caret> = Map<
   CodeViewContextItem<LAnnotation, Caret>
 >;
 
+const DEFAULT_CODE_VIEW_OVERSCROLL_SIZE = 200;
+
+function resolveOverscrollSize(options: { overscrollSize?: number }): number {
+  const { overscrollSize } = options;
+  return overscrollSize != null &&
+    Number.isFinite(overscrollSize) &&
+    overscrollSize >= 0
+    ? overscrollSize
+    : DEFAULT_CODE_VIEW_OVERSCROLL_SIZE;
+}
+
 export class CodeView<LAnnotation = undefined, Caret = undefined> {
   static __STOP = false;
   static __lastScrollPosition = 0;
 
   public type = 'advanced' as const;
   public readonly config: VirtualizerConfig = {
-    overscrollSize: 200,
+    overscrollSize: DEFAULT_CODE_VIEW_OVERSCROLL_SIZE,
     intersectionObserverMargin: 0,
     resizeDebugging: false,
   };
@@ -880,6 +897,7 @@ export class CodeView<LAnnotation = undefined, Caret = undefined> {
     isContainerManaged = false
   ) {
     this.options = options;
+    this.config.overscrollSize = resolveOverscrollSize(options);
     this.computeMetricsCache(options.itemMetrics);
     this.fileOptionsPrototype = this.createFileOptionsPrototype();
     this.diffOptionsPrototype = this.createDiffOptionsPrototype();
@@ -1819,6 +1837,9 @@ export class CodeView<LAnnotation = undefined, Caret = undefined> {
     }
 
     this.options = options;
+    const overscrollSize = resolveOverscrollSize(options);
+    const overscrollChanged = overscrollSize !== this.config.overscrollSize;
+    this.config.overscrollSize = overscrollSize;
     const nextItemMetrics = this.computeMetricsCache(options.itemMetrics);
     const itemMetricsChanged = !areObjectsEqual(
       previousItemMetrics,
@@ -1846,6 +1867,9 @@ export class CodeView<LAnnotation = undefined, Caret = undefined> {
 
     if (layoutChanged || itemLayoutChanged) {
       this.markLayoutDirtyFromIndex(0);
+      this.scrollDirty = true;
+    }
+    if (overscrollChanged) {
       this.scrollDirty = true;
     }
 
