@@ -97,6 +97,7 @@ export * from './utils/isDefaultRenderRange';
 export * from './utils/isWorkerContext';
 export * from './utils/lineAnnotationIdentity';
 export * from './utils/parseDiffDecorations';
+export * from './utils/createStructuralDiff';
 export * from './utils/parseDiffFromFile';
 export * from './utils/parseLineType';
 export * from './utils/parsePatchFiles';
