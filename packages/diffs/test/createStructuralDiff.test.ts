@@ -373,4 +373,59 @@ describe('createStructuralDiff', () => {
     expect(lineTypes.length).toBeGreaterThan(0);
     expect(lineTypes.every((type) => type === 'context')).toBe(true);
   });
+
+  test('a diff whose lines start after unrendered lines renders each line at its own index', async () => {
+    // A host can show one part of a file with the line numbers of the file:
+    // the lines before the part are in the arrays and in no hunk or region.
+    const part = createStructuralDiff(
+      file('p.ts', ['a();', 'old();', 'c();']),
+      file('p.ts', ['a();', 'renewed();', 'c();']),
+      {
+        rows: [
+          [0, 0],
+          [1, 1],
+          [2, 2],
+        ],
+        changedDeletionLines: [1],
+        changedAdditionLines: [1],
+      }
+    );
+    const offset = 4;
+    const pad = (lines: string[]) => [
+      ...Array.from({ length: offset }, () => '\n'),
+      ...lines,
+    ];
+    const shiftedDiff = {
+      ...part,
+      deletionLines: pad(part.deletionLines),
+      additionLines: pad(part.additionLines),
+      hunks: part.hunks.map((hunk) => ({
+        ...hunk,
+        additionStart: hunk.additionStart + offset,
+        additionLineIndex: hunk.additionLineIndex + offset,
+        deletionStart: hunk.deletionStart + offset,
+        deletionLineIndex: hunk.deletionLineIndex + offset,
+        hunkContent: hunk.hunkContent.map((content) => ({
+          ...content,
+          additionLineIndex: content.additionLineIndex + offset,
+          deletionLineIndex: content.deletionLineIndex + offset,
+        })),
+      })),
+    };
+    const renderer = new DiffHunksRenderer({ diffStyle: 'split' });
+    const result = await renderer.asyncRender(shiftedDiff);
+    const lines = collectAllElements(result.additionsContentAST ?? []).filter(
+      (element) => element.properties?.['data-line'] != null
+    );
+    expect(lines.map((element) => element.properties?.['data-line'])).toEqual([
+      5, 6, 7,
+    ]);
+    const text = (element: (typeof lines)[number]) =>
+      collectAllElements([element])
+        .flatMap((node) => node.children)
+        .map((node) => (node.type === 'text' ? node.value : ''))
+        .join('')
+        .trim();
+    expect(lines.map(text)).toEqual(['a();', 'renewed();', 'c();']);
+  });
 });

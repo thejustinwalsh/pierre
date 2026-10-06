@@ -109,7 +109,11 @@ export function renderDiffWithHighlighter(
     segments: HighlightSegment[],
     contentWrapper: FakeArrayType
   ) {
-    if (isWindowedHighlight) {
+    // Segments are kept for every render, not only a windowed one: a diff
+    // whose first rendered line is not line index 0 (its lines array has
+    // unrendered lines before its first hunk and region) needs them to put
+    // each rendered line back at its own index.
+    {
       let segment = segments.at(-1);
       if (
         segment == null ||
@@ -251,7 +255,11 @@ export function renderDiffWithHighlighter(
       languageOverride: forcePlainText ? 'text' : diff.lang,
     });
 
-    if (shouldGroupAll) {
+    if (
+      shouldGroupAll &&
+      startsAtFirstLine(bucket.deletionSegments) &&
+      startsAtFirstLine(bucket.additionSegments)
+    ) {
       code.deletionLines = deletionLines;
       code.additionLines = additionLines;
       continue;
@@ -280,6 +288,15 @@ export function renderDiffWithHighlighter(
   }
 
   return { code, themeStyles, baseThemeType };
+}
+
+// True when the highlighted lines are the lines of the file from index 0 on,
+// in order, so the highlighted array can be used as it is.
+function startsAtFirstLine(segments: HighlightSegment[]): boolean {
+  return (
+    segments.length === 0 ||
+    (segments.length === 1 && segments[0].targetIndex === 0)
+  );
 }
 
 // The line indexes and decoration arrays a line diff writes its highlights to
