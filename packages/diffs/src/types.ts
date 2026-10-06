@@ -376,6 +376,19 @@ export interface FileDiffMetadata {
    * options-level `lineDiffType` for this file only.
    */
   intraLineRanges?: FileIntraLineRanges;
+  /**
+   * Lines that sit in a one-sided change block for layout but did not change:
+   * the host aligned them opposite nothing (for example a reformat that split
+   * one line into several). They render as context on their side, with the
+   * usual filler opposite, and carry no addition or deletion styling. Indexes
+   * into `deletionLines` / `additionLines`.
+   */
+  neutralLines?: FileNeutralLines;
+}
+
+export interface FileNeutralLines {
+  deletions?: readonly number[];
+  additions?: readonly number[];
 }
 
 export interface IntraLineRange {

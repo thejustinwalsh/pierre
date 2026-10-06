@@ -87,6 +87,14 @@ export function renderDiffWithHighlighter(
   const shouldGroupAll = !forcePlainText && !diff.isPartial;
   const expandedHunksForIteration = forcePlainText ? expandedHunks : undefined;
   const intraLineRanges = diff.intraLineRanges ?? null;
+  const neutralDeletions =
+    diff.neutralLines?.deletions != null
+      ? new Set(diff.neutralLines.deletions)
+      : undefined;
+  const neutralAdditions =
+    diff.neutralLines?.additions != null
+      ? new Set(diff.neutralLines.additions)
+      : undefined;
   const buckets = new Map<number, RenderBucket>();
   function getBucketForHunk(hunkIndex: number) {
     const index = shouldGroupAll ? 0 : hunkIndex;
@@ -173,7 +181,12 @@ export function renderDiffWithHighlighter(
           bucket.deletionContent
         );
         bucket.deletionInfo.push({
-          type: type === 'change' ? 'change-deletion' : type,
+          type:
+            type === 'change'
+              ? neutralDeletions?.has(deletionLine.lineIndex) === true
+                ? 'context'
+                : 'change-deletion'
+              : type,
           lineNumber: deletionLine.lineNumber,
           altLineNumber:
             type === 'change'
@@ -191,7 +204,12 @@ export function renderDiffWithHighlighter(
           bucket.additionContent
         );
         bucket.additionInfo.push({
-          type: type === 'change' ? 'change-addition' : type,
+          type:
+            type === 'change'
+              ? neutralAdditions?.has(additionLine.lineIndex) === true
+                ? 'context'
+                : 'change-addition'
+              : type,
           lineNumber: additionLine.lineNumber,
           altLineNumber:
             type === 'change'

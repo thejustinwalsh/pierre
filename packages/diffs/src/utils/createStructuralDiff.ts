@@ -38,7 +38,9 @@ export interface StructuralDiffInput {
  * Builds diff metadata whose alignment, hunks and changed tokens all come
  * from the host instead of from a line diff. The built-in line and word diff
  * never runs for the returned file: rows pair exactly as `rows` says, and
- * only `intraLineRanges` are emphasized.
+ * only `intraLineRanges` are emphasized. A row with one side whose line is
+ * not in `changedDeletionLines` / `changedAdditionLines` is neutral: it
+ * renders as context on its side (see `FileDiffMetadata.neutralLines`).
  */
 export function createStructuralDiff(
   oldFile: FileContents,
@@ -73,6 +75,27 @@ export function createStructuralDiff(
       last[1] = Math.max(last[1], end);
     } else {
       ranges.push([start, end]);
+    }
+  }
+
+  // One-sided rows that the host did not list as changed. They still sit in a
+  // change block, because only a change block can hold a row with one side,
+  // and render as context.
+  const neutralDeletions: number[] = [];
+  const neutralAdditions: number[] = [];
+  for (const [deletion, addition] of rows) {
+    if (
+      deletion != null &&
+      addition == null &&
+      !changedDeletions.has(deletion)
+    ) {
+      neutralDeletions.push(deletion);
+    } else if (
+      addition != null &&
+      deletion == null &&
+      !changedAdditions.has(addition)
+    ) {
+      neutralAdditions.push(addition);
     }
   }
 
@@ -202,6 +225,18 @@ export function createStructuralDiff(
     // Always set, so the renderer never falls back to its own word diff for
     // this file, even when the host found no token-level changes.
     intraLineRanges: input.intraLineRanges ?? {},
+    ...(neutralDeletions.length > 0 || neutralAdditions.length > 0
+      ? {
+          neutralLines: {
+            ...(neutralDeletions.length > 0
+              ? { deletions: neutralDeletions }
+              : {}),
+            ...(neutralAdditions.length > 0
+              ? { additions: neutralAdditions }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

@@ -248,4 +248,129 @@ describe('createStructuralDiff', () => {
     // the one-sided rows carry none, although a word diff would mark them.
     expect(spans).toHaveLength(2);
   });
+
+  test('a one-sided row that the host did not mark as changed is neutral', () => {
+    const diff = createStructuralDiff(
+      file('a.ts', oldLines),
+      file('a.ts', newLines),
+      {
+        rows,
+        // Old line 2 sits opposite nothing (the reformat) and is not listed.
+        // Old line 5 and new line 5 sit opposite nothing and are listed.
+        changedDeletionLines: [3, 5],
+        changedAdditionLines: [2, 5],
+        contextLines: 1,
+      }
+    );
+    expect(diff.neutralLines).toEqual({ deletions: [2] });
+    // The row keeps its place in a change block: only that block can hold a
+    // row with one side.
+    expect(diff.hunks[0].hunkContent[1]).toEqual({
+      type: 'change',
+      deletions: 1,
+      deletionLineIndex: 2,
+      additions: 0,
+      additionLineIndex: 2,
+    });
+
+    const allListed = createStructuralDiff(
+      file('a.ts', oldLines),
+      file('a.ts', newLines),
+      {
+        rows,
+        changedDeletionLines: [2, 3, 5],
+        changedAdditionLines: [2, 5],
+      }
+    );
+    expect(allListed.neutralLines).toBeUndefined();
+  });
+
+  test('a format-only split has neutral rows only', () => {
+    // One line became three; the host lists no changed line.
+    const diff = createStructuralDiff(
+      file('f.ts', ['const a = { b: 1, c: 2 };']),
+      file('f.ts', ['const a = {', '  b: 1,', '  c: 2 };']),
+      {
+        rows: [
+          [0, 0],
+          [null, 1],
+          [null, 2],
+        ],
+        changedDeletionLines: [],
+        changedAdditionLines: [],
+      }
+    );
+    expect(diff.neutralLines).toEqual({ additions: [1, 2] });
+    expect(diff.hunks).toHaveLength(1);
+  });
+
+  for (const diffStyle of ['split', 'unified'] as const) {
+    test(`neutral rows render as context in ${diffStyle} view`, async () => {
+      const diff = createStructuralDiff(
+        file('a.ts', oldLines),
+        file('a.ts', newLines),
+        {
+          rows,
+          changedDeletionLines: [3, 5],
+          changedAdditionLines: [2, 5],
+          contextLines: 1,
+        }
+      );
+      const renderer = new DiffHunksRenderer({ diffStyle });
+      const result = await renderer.asyncRender(diff);
+      const elements = collectAllElements([
+        ...(result.deletionsContentAST ?? []),
+        ...(result.additionsContentAST ?? []),
+        ...(result.unifiedContentAST ?? []),
+      ]).filter((element) => element.properties?.['data-line'] != null);
+      const typesByText = new Map<string, unknown>();
+      for (const element of elements) {
+        const text = collectAllElements([element])
+          .flatMap((node) => node.children)
+          .filter((node) => node.type === 'text')
+          .map((node) => (node.type === 'text' ? node.value : ''))
+          .join('')
+          .trim();
+        typesByText.set(text, element.properties?.['data-line-type']);
+      }
+      // The reformatted line: one side only, not changed, so it is context.
+      expect(typesByText.get('items) {')).toBe('context');
+      // Listed one-sided rows keep their change styling.
+      expect(typesByText.get('const unused = 1;')).toBe('change-deletion');
+      expect(typesByText.get('export const added = 2;')).toBe(
+        'change-addition'
+      );
+      // A paired changed row is a change on both sides.
+      expect(typesByText.get('return items.length;')).toBe('change-deletion');
+      expect(typesByText.get('return items.size;')).toBe('change-addition');
+    });
+  }
+
+  test('the gutter of a neutral row has no change type either', async () => {
+    const diff = createStructuralDiff(
+      file('f.ts', ['const a = { b: 1, c: 2 };']),
+      file('f.ts', ['const a = {', '  b: 1,', '  c: 2 };']),
+      {
+        rows: [
+          [0, 0],
+          [null, 1],
+          [null, 2],
+        ],
+        changedDeletionLines: [],
+        changedAdditionLines: [],
+      }
+    );
+    const renderer = new DiffHunksRenderer({ diffStyle: 'split' });
+    const result = await renderer.asyncRender(diff);
+    const lineTypes = collectAllElements([
+      ...(result.additionsContentAST ?? []),
+      ...(result.deletionsContentAST ?? []),
+      ...(result.additionsGutterAST ?? []),
+      ...(result.deletionsGutterAST ?? []),
+    ])
+      .map((element) => element.properties?.['data-line-type'])
+      .filter((type) => type != null);
+    expect(lineTypes.length).toBeGreaterThan(0);
+    expect(lineTypes.every((type) => type === 'context')).toBe(true);
+  });
 });

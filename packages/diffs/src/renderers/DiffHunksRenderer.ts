@@ -865,9 +865,48 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
     diff.editSessionDirty = true;
   }
 
+  // Lines of the diff being rendered that the host marked neutral. Set at the
+  // start of each render pass.
+  private neutralDeletionLines: ReadonlySet<number> | undefined;
+  private neutralAdditionLines: ReadonlySet<number> | undefined;
+
+  private setNeutralLines(diff: FileDiffMetadata): void {
+    const { deletions, additions } = diff.neutralLines ?? {};
+    this.neutralDeletionLines =
+      deletions != null && deletions.length > 0
+        ? new Set(deletions)
+        : undefined;
+    this.neutralAdditionLines =
+      additions != null && additions.length > 0
+        ? new Set(additions)
+        : undefined;
+  }
+
+  // A one-sided line that did not change renders as context.
+  private isNeutralLine(
+    side: 'deletions' | 'additions',
+    lineIndex: number | undefined
+  ): boolean {
+    if (lineIndex == null) {
+      return false;
+    }
+    return side === 'deletions'
+      ? this.neutralDeletionLines?.has(lineIndex) === true
+      : this.neutralAdditionLines?.has(lineIndex) === true;
+  }
+
   protected getUnifiedLineDecoration({
-    lineType,
+    lineType: givenLineType,
+    additionLineIndex,
+    deletionLineIndex,
   }: UnifiedLineDecorationProps): LineDecoration {
+    const lineType: LineTypes =
+      (givenLineType === 'change-addition' &&
+        this.isNeutralLine('additions', additionLineIndex)) ||
+      (givenLineType === 'change-deletion' &&
+        this.isNeutralLine('deletions', deletionLineIndex))
+        ? 'context'
+        : givenLineType;
     return {
       gutterLineType: lineType,
       contentProperties: {
@@ -879,12 +918,15 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
   protected getSplitLineDecoration({
     side,
     type,
+    lineIndex,
   }: SplitLineDecorationProps): LineDecoration {
     const lineType: LineTypes =
       type === 'change'
-        ? side === 'deletions'
-          ? 'change-deletion'
-          : 'change-addition'
+        ? this.isNeutralLine(side, lineIndex)
+          ? 'context'
+          : side === 'deletions'
+            ? 'change-deletion'
+            : 'change-addition'
         : type;
     return {
       gutterLineType: lineType,
@@ -1484,6 +1526,7 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
     renderRange: RenderRange,
     { code, themeStyles, baseThemeType }: ThemedDiffResult
   ): HunksRenderResult {
+    this.setNeutralLines(fileDiff);
     const {
       diffStyle,
       disableFileHeader,
